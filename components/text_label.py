@@ -13,8 +13,8 @@ class TextLabel:
         offset=(0, 0), 
         text_color=(255, 255, 255), 
         font=cv2.FONT_HERSHEY_SIMPLEX, 
-        font_scale=0.8, 
-        thickness=2
+        font_scale=0.6, 
+        thickness=1
     ):
         """
         Initializes the TextLabel component.

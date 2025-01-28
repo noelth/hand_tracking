@@ -14,8 +14,8 @@ class Card:
         alpha=0.5, 
         text_color=(255, 255, 255), 
         font=cv2.FONT_HERSHEY_SIMPLEX, 
-        font_scale=0.8,
-        thickness=2
+        font_scale=0.7,
+        thickness=1
     ):
         """
         Initializes the Card component.
