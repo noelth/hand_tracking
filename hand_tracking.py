@@ -2,6 +2,7 @@ import cv2
 import mediapipe as mp
 from webcam_module import start_webcam, release_webcam
 import numpy as np
+from processing import calculate_distance
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
@@ -101,6 +102,40 @@ def apply_vignette(frame, opacity=0.4, vignette_color=(128, 128, 128)):
     return cv2.addWeighted(frame, 1 - opacity, vignette, opacity, 0)
 
 
+class DynamicCircle:
+    def __init__(self, center, radius, color=(0, 255, 255), thickness=2):
+        """
+        Initializes the circle.
+        Args:
+            center: (x, y) tuple for the circle's center.
+            radius: Initial radius of the circle.
+            color: BGR color of the circle.
+            thickness: Thickness of the circle edge.
+        """
+        self.center = center
+        self.radius = radius
+        self.color = color
+        self.thickness = thickness
+
+    def update(self, center, radius):
+        """
+        Updates the circle's center and radius.
+        Args:
+            center: (x, y) tuple for the circle's new center.
+            radius: New radius of the circle.
+        """
+        self.center = center
+        self.radius = radius
+
+    def draw(self, frame):
+        """
+        Draws the circle on the frame.
+        Args:
+            frame: The video frame.
+        """
+        cv2.circle(frame, self.center, int(self.radius), self.color, self.thickness)
+
+
 def main():
     # Start webcam
     try:
@@ -109,8 +144,9 @@ def main():
         print(e)
         return
 
-    # Initialize the Details Card
+    # Initialize the Details Card and Dynamic Circle
     details_card = Card(position=(10, 10), width=300, box_color=(0, 0, 0), alpha=0.6)
+    dynamic_circle = DynamicCircle(center=(0, 0), radius=0)
 
     # Initialize MediaPipe Hands
     with mp_hands.Hands(
@@ -127,13 +163,7 @@ def main():
                 print("Error: Could not read frame.")
                 break
 
-            # Flip the frame horizontally for mirror effect
-            frame = cv2.flip(frame, 1)
-
-            # Apply the vignette effect
-            frame = apply_vignette(frame, opacity=0.6, vignette_color=(0,0,255))
-
-            # Convert to RGB for MediaPipe processing
+            frame = cv2.flip(frame, 1)  # Flip the frame horizontally
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = hands.process(frame_rgb)
 
@@ -143,50 +173,40 @@ def main():
             # Calculate runtime
             current_time = cv2.getTickCount()
             runtime = (current_time - start_time) / cv2.getTickFrequency()
-            runtime_text = f"Run Time: {runtime:.2f} s"
+            details_card.add_line(f"Run Time: {runtime:.2f} s")
 
-            # Add details to the card
-            num_hands = len(results.multi_hand_landmarks) if results.multi_hand_landmarks else 0
-            details_card.add_line(f"Hands Detected: {num_hands}")
-            details_card.add_line(runtime_text)
-
+            # Process landmarks and draw circle
             if results.multi_hand_landmarks:
                 for hand_landmarks, hand_classification in zip(
                     results.multi_hand_landmarks, results.multi_handedness
                 ):
-                    hand_label = hand_classification.classification[0].label
-                    color = (0, 0, 255) if hand_label == "Right" else (255, 0, 0)  # Red for right, blue for left
+                    if hand_classification.classification[0].label == "Right":
+                        # Get right thumb and index finger landmarks
+                        thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
+                        index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
 
-                    # Draw landmarks and connections
-                    mp_drawing.draw_landmarks(
-                        frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
-                        mp_drawing.DrawingSpec(color=color, thickness=2, circle_radius=2),
-                        mp_drawing.DrawingSpec(color=color, thickness=2, circle_radius=2),
-                    )
+                        # Calculate the distance
+                        distance = calculate_distance(thumb_tip, index_tip, frame.shape[1], frame.shape[0])
+                        details_card.add_line(f"Distance: {distance:.2f}px")
 
-                    # Add wrist label for each hand
-                    wrist = hand_landmarks.landmark[mp_hands.HandLandmark.WRIST]
-                    wrist_x = int(wrist.x * frame.shape[1])
-                    wrist_y = int(wrist.y * frame.shape[0])
-                    wrist_label = TextLabel(
-                        label=f"{hand_label} Hand",
-                        anchor=(wrist_x, wrist_y),
-                        offset=(30, -20) if hand_label == "Right" else (-80, -20),
-                        text_color=(0, 255, 0)  # Green
-                    )
-                    wrist_label.draw(frame)
+                        # Update and draw the dynamic circle
+                        circle_center = (
+                            int((thumb_tip.x + index_tip.x) / 2 * frame.shape[1]),
+                            int((thumb_tip.y + index_tip.y) / 2 * frame.shape[0]),
+                        )
+                        dynamic_circle.update(center=circle_center, radius=distance / 2)
+                        dynamic_circle.draw(frame)
 
             # Draw the details card
             frame = details_card.draw(frame)
 
             # Display the frame
-            cv2.imshow("Hand Tracking with Vignette", frame)
+            cv2.imshow("Hand Tracking with Circle", frame)
 
             # Exit when 'q' is pressed
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
-    # Release resources
     release_webcam(cap)
 
 
