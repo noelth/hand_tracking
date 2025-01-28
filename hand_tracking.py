@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 from webcam_module import start_webcam, release_webcam
+import numpy as np
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
@@ -13,15 +14,6 @@ FINGER_COLORS = {
     "Middle Finger": (0, 0, 255),  # Red
     "Ring Finger": (255, 255, 0),  # Cyan
     "Pinky": (255, 0, 255),  # Magenta
-}
-
-# Finger landmark mapping
-FINGER_LANDMARKS = {
-    "Thumb": mp_hands.HandLandmark.THUMB_TIP,
-    "Index Finger": mp_hands.HandLandmark.INDEX_FINGER_TIP,
-    "Middle Finger": mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
-    "Ring Finger": mp_hands.HandLandmark.RING_FINGER_TIP,
-    "Pinky": mp_hands.HandLandmark.PINKY_TIP,
 }
 
 # Define the reusable Card and TextLabel components
@@ -82,6 +74,33 @@ class TextLabel:
         cv2.putText(frame, self.label, position, self.font, self.font_scale, self.text_color, self.thickness)
 
 
+def apply_vignette(frame, opacity=0.4, vignette_color=(128, 128, 128)):
+    """
+    Applies a vignette effect to the video frame.
+    Args:
+        frame: The video frame.
+        opacity: Opacity of the vignette (0 = no effect, 1 = full effect).
+        vignette_color: BGR color of the vignette.
+    Returns:
+        The frame with the vignette applied.
+    """
+    rows, cols = frame.shape[:2]
+
+    # Create a vignette mask using Gaussian kernels
+    kernel_x = cv2.getGaussianKernel(cols, cols / 2)
+    kernel_y = cv2.getGaussianKernel(rows, rows / 2)
+    kernel = kernel_y * kernel_x.T
+    mask = 255 * kernel / np.linalg.norm(kernel)
+
+    # Apply the mask to create a colored vignette
+    vignette = np.zeros_like(frame, dtype=np.uint8)
+    for i in range(3):  # Apply the vignette color to each channel
+        vignette[:, :, i] = mask * (vignette_color[i]) # / 255.0) divide to normalize
+
+    # Blend the vignette with the frame
+    return cv2.addWeighted(frame, 1 - opacity, vignette, opacity, 0)
+
+
 def main():
     # Start webcam
     try:
@@ -111,6 +130,9 @@ def main():
             # Flip the frame horizontally for mirror effect
             frame = cv2.flip(frame, 1)
 
+            # Apply the vignette effect
+            frame = apply_vignette(frame, opacity=0.6, vignette_color=(0,0,255))
+
             # Convert to RGB for MediaPipe processing
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = hands.process(frame_rgb)
@@ -129,90 +151,36 @@ def main():
             details_card.add_line(runtime_text)
 
             if results.multi_hand_landmarks:
-                # Separate hands into right and left based on handedness
-                right_hand_landmarks = None
-                left_hand_landmarks = None
-
                 for hand_landmarks, hand_classification in zip(
                     results.multi_hand_landmarks, results.multi_handedness
                 ):
                     hand_label = hand_classification.classification[0].label
-                    if hand_label == "Right":
-                        right_hand_landmarks = hand_landmarks
-                    elif hand_label == "Left":
-                        left_hand_landmarks = hand_landmarks
+                    color = (0, 0, 255) if hand_label == "Right" else (255, 0, 0)  # Red for right, blue for left
 
-                # Process all right-hand labels and drawing
-                if right_hand_landmarks:
-                    # Draw landmarks and connections for right hand
+                    # Draw landmarks and connections
                     mp_drawing.draw_landmarks(
-                        frame, right_hand_landmarks, mp_hands.HAND_CONNECTIONS,
-                        mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),  # Red
-                        mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2),
+                        frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                        mp_drawing.DrawingSpec(color=color, thickness=2, circle_radius=2),
+                        mp_drawing.DrawingSpec(color=color, thickness=2, circle_radius=2),
                     )
 
-                    # Add wrist label for the right hand
-                    wrist = right_hand_landmarks.landmark[mp_hands.HandLandmark.WRIST]
+                    # Add wrist label for each hand
+                    wrist = hand_landmarks.landmark[mp_hands.HandLandmark.WRIST]
                     wrist_x = int(wrist.x * frame.shape[1])
                     wrist_y = int(wrist.y * frame.shape[0])
                     wrist_label = TextLabel(
-                        label="Right Hand",
+                        label=f"{hand_label} Hand",
                         anchor=(wrist_x, wrist_y),
-                        offset=(30, -20),
+                        offset=(30, -20) if hand_label == "Right" else (-80, -20),
                         text_color=(0, 255, 0)  # Green
                     )
                     wrist_label.draw(frame)
-
-                    # Add label for middle PIP of the right hand
-                    middle_pip = right_hand_landmarks.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_PIP]
-                    middle_pip_x = int(middle_pip.x * frame.shape[1])
-                    middle_pip_y = int(middle_pip.y * frame.shape[0])
-                    middle_pip_label = TextLabel(
-                        label="Right Middle PIP",
-                        anchor=(middle_pip_x, middle_pip_y),
-                        offset=(-50, -10),
-                        text_color=(0, 255, 255)  # Yellow
-                    )
-                    middle_pip_label.draw(frame)
-
-                # Process all left-hand labels and drawing
-                if left_hand_landmarks:
-                    # Draw landmarks and connections for left hand
-                    mp_drawing.draw_landmarks(
-                        frame, left_hand_landmarks, mp_hands.HAND_CONNECTIONS,
-                        mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2),  # Blue
-                        mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2),
-                    )
-
-                    # Add wrist label for the left hand
-                    wrist = left_hand_landmarks.landmark[mp_hands.HandLandmark.WRIST]
-                    wrist_x = int(wrist.x * frame.shape[1])
-                    wrist_y = int(wrist.y * frame.shape[0])
-                    wrist_label = TextLabel(
-                        label="Left Hand",
-                        anchor=(wrist_x, wrist_y),
-                        offset=(-80, -20),
-                        text_color=(0, 255, 0)  # Green
-                    )
-                    wrist_label.draw(frame)
-
-                    # Add label for left pinky tip
-                    pinky_tip = left_hand_landmarks.landmark[mp_hands.HandLandmark.PINKY_TIP]
-                    pinky_x = int(pinky_tip.x * frame.shape[1])
-                    pinky_y = int(pinky_tip.y * frame.shape[0])
-                    pinky_label = TextLabel(
-                        label="Left Pinky",
-                        anchor=(pinky_x, pinky_y),
-                        offset=(-50, -10),
-                        text_color=(0, 255, 255)  # Yellow
-                    )
-                    pinky_label.draw(frame)
 
             # Draw the details card
             frame = details_card.draw(frame)
 
             # Display the frame
-            cv2.imshow("Hand Tracking with Labels", frame)
+            cv2.imshow("Hand Tracking with Vignette", frame)
 
             # Exit when 'q' is pressed
             if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -220,6 +188,7 @@ def main():
 
     # Release resources
     release_webcam(cap)
+
 
 if __name__ == "__main__":
     main()
