@@ -1,8 +1,8 @@
 import cv2
 import mediapipe as mp
 from webcam_module import start_webcam, release_webcam
+from processing import calculate_midpoint, calculate_distance
 import numpy as np
-from processing import calculate_distance
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
@@ -15,6 +15,15 @@ FINGER_COLORS = {
     "Middle Finger": (0, 0, 255),  # Red
     "Ring Finger": (255, 255, 0),  # Cyan
     "Pinky": (255, 0, 255),  # Magenta
+}
+
+# Finger landmark mapping
+FINGER_LANDMARKS = {
+    "Thumb": mp_hands.HandLandmark.THUMB_TIP,
+    "Index Finger": mp_hands.HandLandmark.INDEX_FINGER_TIP,
+    "Middle Finger": mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
+    "Ring Finger": mp_hands.HandLandmark.RING_FINGER_TIP,
+    "Pinky": mp_hands.HandLandmark.PINKY_TIP,
 }
 
 # Define the reusable Card and TextLabel components
@@ -96,44 +105,10 @@ def apply_vignette(frame, opacity=0.4, vignette_color=(128, 128, 128)):
     # Apply the mask to create a colored vignette
     vignette = np.zeros_like(frame, dtype=np.uint8)
     for i in range(3):  # Apply the vignette color to each channel
-        vignette[:, :, i] = mask * (vignette_color[i]) # / 255.0) divide to normalize
+        vignette[:, :, i] = mask * (vignette_color[i])
 
     # Blend the vignette with the frame
     return cv2.addWeighted(frame, 1 - opacity, vignette, opacity, 0)
-
-
-class DynamicCircle:
-    def __init__(self, center, radius, color=(0, 255, 255), thickness=2):
-        """
-        Initializes the circle.
-        Args:
-            center: (x, y) tuple for the circle's center.
-            radius: Initial radius of the circle.
-            color: BGR color of the circle.
-            thickness: Thickness of the circle edge.
-        """
-        self.center = center
-        self.radius = radius
-        self.color = color
-        self.thickness = thickness
-
-    def update(self, center, radius):
-        """
-        Updates the circle's center and radius.
-        Args:
-            center: (x, y) tuple for the circle's new center.
-            radius: New radius of the circle.
-        """
-        self.center = center
-        self.radius = radius
-
-    def draw(self, frame):
-        """
-        Draws the circle on the frame.
-        Args:
-            frame: The video frame.
-        """
-        cv2.circle(frame, self.center, int(self.radius), self.color, self.thickness)
 
 
 def main():
@@ -144,9 +119,8 @@ def main():
         print(e)
         return
 
-    # Initialize the Details Card and Dynamic Circle
+    # Initialize the Details Card
     details_card = Card(position=(10, 10), width=300, box_color=(0, 0, 0), alpha=0.6)
-    dynamic_circle = DynamicCircle(center=(0, 0), radius=0)
 
     # Initialize MediaPipe Hands
     with mp_hands.Hands(
@@ -163,7 +137,13 @@ def main():
                 print("Error: Could not read frame.")
                 break
 
-            frame = cv2.flip(frame, 1)  # Flip the frame horizontally
+            # Flip the frame horizontally for mirror effect
+            frame = cv2.flip(frame, 1)
+
+            # Apply the vignette effect
+            frame = apply_vignette(frame, opacity=0.6, vignette_color=(0, 0, 255))
+
+            # Convert to RGB for MediaPipe processing
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = hands.process(frame_rgb)
 
@@ -173,40 +153,58 @@ def main():
             # Calculate runtime
             current_time = cv2.getTickCount()
             runtime = (current_time - start_time) / cv2.getTickFrequency()
-            details_card.add_line(f"Run Time: {runtime:.2f} s")
+            runtime_text = f"Run Time: {runtime:.2f} s"
 
-            # Process landmarks and draw circle
+            # Add details to the card
+            num_hands = len(results.multi_hand_landmarks) if results.multi_hand_landmarks else 0
+            details_card.add_line(f"Hands Detected: {num_hands}")
+            details_card.add_line(runtime_text)
+
             if results.multi_hand_landmarks:
                 for hand_landmarks, hand_classification in zip(
                     results.multi_hand_landmarks, results.multi_handedness
                 ):
-                    if hand_classification.classification[0].label == "Right":
-                        # Get right thumb and index finger landmarks
+                    hand_label = hand_classification.classification[0].label
+
+                    if hand_label == "Right":
+                        # Calculate the circle's center and radius
                         thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
                         index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
 
-                        # Calculate the distance
-                        distance = calculate_distance(thumb_tip, index_tip, frame.shape[1], frame.shape[0])
-                        details_card.add_line(f"Distance: {distance:.2f}px")
+                        circle_center = calculate_midpoint(thumb_tip, index_tip, frame.shape[:2])
+                        circle_radius = int(calculate_distance(thumb_tip, index_tip, frame.shape[:2]) / 2)
 
-                        # Update and draw the dynamic circle
-                        circle_center = (
-                            int((thumb_tip.x + index_tip.x) / 2 * frame.shape[1]),
-                            int((thumb_tip.y + index_tip.y) / 2 * frame.shape[0]),
+                        # Draw the circle
+                        cv2.circle(frame, circle_center, circle_radius, (0, 255, 0), 2)
+
+                        # Add radius to the details card
+                        details_card.add_line(f"Circle Radius: {circle_radius:.2f}px")
+
+                    # Draw finger labels
+                    for finger_name, finger_landmark in FINGER_LANDMARKS.items():
+                        landmark = hand_landmarks.landmark[finger_landmark]
+                        finger_x = int(landmark.x * frame.shape[1])
+                        finger_y = int(landmark.y * frame.shape[0])
+
+                        label = TextLabel(
+                            label=finger_name,
+                            anchor=(finger_x, finger_y),
+                            offset=(10, -10),
+                            text_color=FINGER_COLORS[finger_name]
                         )
-                        dynamic_circle.update(center=circle_center, radius=distance / 2)
-                        dynamic_circle.draw(frame)
+                        label.draw(frame)
 
             # Draw the details card
             frame = details_card.draw(frame)
 
             # Display the frame
-            cv2.imshow("Hand Tracking with Circle", frame)
+            cv2.imshow("Hand Tracking with Circle Radius", frame)
 
             # Exit when 'q' is pressed
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
+    # Release resources
     release_webcam(cap)
 
 
