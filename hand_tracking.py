@@ -11,18 +11,18 @@ mp_drawing = mp.solutions.drawing_utils
 # Colors for each finger
 FINGER_COLORS = {
     "Thumb": (255, 0, 0),    # Blue
-    "Index Finger": (0, 255, 0),  # Green
-    "Middle Finger": (0, 0, 255),  # Red
-    "Ring Finger": (255, 255, 0),  # Cyan
+    "Index": (0, 255, 0),  # Green
+    "Middle": (0, 0, 255),  # Red
+    "Ring": (255, 255, 0),  # Cyan
     "Pinky": (255, 0, 255),  # Magenta
 }
 
 # Finger landmark mapping
 FINGER_LANDMARKS = {
     "Thumb": mp_hands.HandLandmark.THUMB_TIP,
-    "Index Finger": mp_hands.HandLandmark.INDEX_FINGER_TIP,
-    "Middle Finger": mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
-    "Ring Finger": mp_hands.HandLandmark.RING_FINGER_TIP,
+    "Index": mp_hands.HandLandmark.INDEX_FINGER_TIP,
+    "Middle": mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
+    "Ring": mp_hands.HandLandmark.RING_FINGER_TIP,
     "Pinky": mp_hands.HandLandmark.PINKY_TIP,
 }
 
