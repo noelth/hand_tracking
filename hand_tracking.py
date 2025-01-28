@@ -7,20 +7,10 @@ from webcam_module import start_webcam, release_webcam
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
-# Colors for each finger
-FINGER_COLORS = {
-    0: (255, 0, 0),    # Thumb (Blue)
-    1: (0, 255, 0),    # Index (Green)
-    2: (0, 0, 255),    # Middle (Red)
-    3: (255, 255, 0),  # Ring (Cyan)
-    4: (255, 0, 255),  # Pinky (Magenta)
-}
-
-# Card class for details
+# Card Component
 class Card:
-    def __init__(self, position, size=(250, 100), box_color=(0, 0, 0), alpha=0.6, text_color=(255, 255, 255), font=cv2.FONT_HERSHEY_SIMPLEX, font_scale=0.8):
+    def __init__(self, position, box_color=(0, 0, 0), alpha=0.5, text_color=(255, 255, 255), font=cv2.FONT_HERSHEY_SIMPLEX, font_scale=0.8):
         self.position = position
-        self.size = size
         self.box_color = box_color
         self.alpha = alpha
         self.text_color = text_color
@@ -28,138 +18,148 @@ class Card:
         self.font_scale = font_scale
         self.details = {}
 
-    def update_details(self, key, value):
-        """Update the details displayed on the card."""
-        self.details[key] = value
+    def update_details(self, new_details):
+        self.details.update(new_details)
 
     def draw(self, frame):
-        """Draw the details card on the frame."""
-        overlay = frame.copy()
         x, y = self.position
-        w, h = self.size
-
-        # Draw the semi-transparent box
-        cv2.rectangle(overlay, (x, y), (x + w, y + h), self.box_color, -1)
+        line_height = 25  # Adjust line spacing
+        total_height = line_height * len(self.details)
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (x, y), (x + 250, y + total_height + 20), self.box_color, -1)
         frame = cv2.addWeighted(overlay, self.alpha, frame, 1 - self.alpha, 0)
 
-        # Draw each detail line
-        line_height = 30  # Vertical spacing between lines
         for i, (key, value) in enumerate(self.details.items()):
             text = f"{key}: {value}"
             text_y = y + (i + 1) * line_height
-            cv2.putText(frame, text, (x + 10, text_y), self.font, self.font_scale, self.text_color, thickness=2)
+            cv2.putText(frame, text, (x + 10, text_y), self.font, self.font_scale, self.text_color, 2)
 
         return frame
 
-# TextLabel class for hand labels
+# TextLabel Component
 class TextLabel:
-    def __init__(self, landmark, text="", text_color=(255, 255, 255), offset=(0, 0), font=cv2.FONT_HERSHEY_SIMPLEX, font_scale=0.8, thickness=2):
-        self.landmark = landmark
-        self.text = text
-        self.text_color = text_color
+    def __init__(self, label, anchor, offset=(0, 0), text_color=(255, 255, 255), font=cv2.FONT_HERSHEY_SIMPLEX, font_scale=0.8, thickness=2):
+        self.label = label
+        self.anchor = anchor
         self.offset = offset
+        self.text_color = text_color
         self.font = font
         self.font_scale = font_scale
         self.thickness = thickness
 
-    def set_text(self, text):
-        self.text = text
+    def draw(self, frame, landmarks=None):
+        if isinstance(self.anchor, tuple):  # Fixed point (x, y)
+            x, y = self.anchor
+        elif landmarks and isinstance(self.anchor, mp_hands.HandLandmark):  # Dynamic point from landmarks
+            x = int(landmarks[self.anchor].x * frame.shape[1])
+            y = int(landmarks[self.anchor].y * frame.shape[0])
+        else:
+            raise ValueError("Invalid anchor point or missing landmarks for dynamic anchor.")
 
-    def set_offset(self, offset):
-        self.offset = offset
-
-    def draw(self, frame, hand_landmarks, frame_shape):
-        if not self.text or not hand_landmarks:
-            return
-
-        # Get the landmark position in pixel coordinates
-        lm = hand_landmarks.landmark[self.landmark]
-        x, y = int(lm.x * frame_shape[1]), int(lm.y * frame_shape[0])
-
-        # Apply the offset
-        text_x = x + self.offset[0]
-        text_y = y + self.offset[1]
+        # Apply offset
+        x += self.offset[0]
+        y += self.offset[1]
 
         # Draw the text
-        cv2.putText(frame, self.text, (text_x, text_y), self.font, self.font_scale, self.text_color, self.thickness)
+        cv2.putText(frame, self.label, (x, y), self.font, self.font_scale, self.text_color, self.thickness)
 
+# Main Hand Tracking Function
 def main():
+    # Start webcam
     try:
         cap = start_webcam(camera_index=1)
     except Exception as e:
         print(e)
         return
 
-    # Initialize Card and TextLabel instances
-    details_card = Card(position=(10, 10), size=(300, 150), box_color=(0, 0, 0), alpha=0.6)
-    hand_labels = {
-        "Left": TextLabel(landmark=mp_hands.HandLandmark.WRIST, text_color=(255, 0, 0), offset=(-50, -20)),
-        "Right": TextLabel(landmark=mp_hands.HandLandmark.WRIST, text_color=(0, 0, 255), offset=(50, 20)),
-    }
+    # Initialize DetailsCard
+    details_card = Card(position=(10, 10), box_color=(0, 0, 0), alpha=0.6)
 
+    # Start time for run time calculation
+    start_time = time.time()
+
+    # Initialize MediaPipe Hands
     with mp_hands.Hands(
         static_image_mode=False,
         max_num_hands=2,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
     ) as hands:
-        start_time = time.time()
-
         while True:
             ret, frame = cap.read()
             if not ret:
                 print("Error: Could not read frame.")
                 break
 
+            # Flip the frame horizontally for mirror effect
             frame = cv2.flip(frame, 1)
+
+            # Convert to RGB for MediaPipe processing
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = hands.process(frame_rgb)
 
-            # Update Run Time
+            # Gather details for the details card
             run_time = int(time.time() - start_time)
-            details_card.update_details("Run Time", f"{run_time}s")
+            details = {"Hands Detected": 0, "Run Time": f"{run_time}s"}
 
-            # Process hand landmarks
+            # Store handedness information to avoid redundant checks
+            handedness_info = {}
+
+            # Draw landmarks, connections, and labels if detected
             if results.multi_hand_landmarks:
-                num_hands = len(results.multi_hand_landmarks)
-                details_card.update_details("Hands Detected", num_hands)
-
-                for hand_landmarks, hand_classification in zip(
-                    results.multi_hand_landmarks, results.multi_handedness
+                details["Hands Detected"] = len(results.multi_hand_landmarks)
+                for idx, (hand_landmarks, hand_classification) in enumerate(
+                    zip(results.multi_hand_landmarks, results.multi_handedness)
                 ):
+                    # Determine hand label: "Left" or "Right"
                     hand_label = hand_classification.classification[0].label
+                    handedness_info[idx] = hand_label
+                    color = (0, 0, 255) if hand_label == "Right" else (255, 0, 0)
 
-                    # Draw finger connections and landmarks
-                    for connection in mp_hands.HAND_CONNECTIONS:
-                        start_idx, end_idx = tuple(connection)
-                        start = hand_landmarks.landmark[start_idx]
-                        end = hand_landmarks.landmark[end_idx]
+                    # Draw landmarks and connections
+                    mp_drawing.draw_landmarks(
+                        frame, hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                        mp_drawing.DrawingSpec(color=color, thickness=2, circle_radius=2),
+                        mp_drawing.DrawingSpec(color=color, thickness=2, circle_radius=2),
+                    )
 
-                        start_point = (int(start.x * frame.shape[1]), int(start.y * frame.shape[0]))
-                        end_point = (int(end.x * frame.shape[1]), int(end.y * frame.shape[0]))
-                        finger_color = FINGER_COLORS[start_idx % 5]
-                        cv2.line(frame, start_point, end_point, finger_color, thickness=2)
+                    # Draw label for wrist
+                    wrist = hand_landmarks.landmark[mp_hands.HandLandmark.WRIST]
+                    wrist_x = int(wrist.x * frame.shape[1])
+                    wrist_y = int(wrist.y * frame.shape[0])
+                    wrist_label = TextLabel(
+                        label=f"{hand_label} Hand",
+                        anchor=(wrist_x, wrist_y),
+                        offset=(30, -30) if hand_label == "Right" else (-30, -30),
+                        text_color=color
+                    )
+                    wrist_label.draw(frame)
 
-                    for idx, landmark in enumerate(hand_landmarks.landmark):
-                        cx, cy = int(landmark.x * frame.shape[1]), int(landmark.y * frame.shape[0])
-                        cv2.circle(frame, (cx, cy), radius=4, color=(255, 255, 255), thickness=-1)
+                    # Draw label for left pinky if it's the left hand
+                    if hand_label == "Left":
+                        pinky_tip = hand_landmarks.landmark[mp_hands.HandLandmark.PINKY_TIP]
+                        pinky_x = int(pinky_tip.x * frame.shape[1])
+                        pinky_y = int(pinky_tip.y * frame.shape[0])
+                        pinky_label = TextLabel(
+                            label="Left Pinky",
+                            anchor=(pinky_x, pinky_y),
+                            offset=(-50, -10),
+                            text_color=(0, 255, 255)
+                        )
+                        pinky_label.draw(frame)
 
-                    # Update and draw the hand label
-                    if hand_label == "Right":
-                        hand_labels["Right"].set_text("Right Hand")
-                        hand_labels["Right"].draw(frame, hand_landmarks, frame_shape=frame.shape)
-                    elif hand_label == "Left":
-                        hand_labels["Left"].set_text("Left Hand")
-                        hand_labels["Left"].draw(frame, hand_landmarks, frame_shape=frame.shape)
-            else:
-                details_card.update_details("Hands Detected", 0)
-
+            # Update and draw the details card
+            details_card.update_details(details)
             frame = details_card.draw(frame)
-            cv2.imshow("Hand Tracking with Optimizations", frame)
 
+            # Display the frame
+            cv2.imshow("Hand Tracking with Labels", frame)
+
+            # Exit when 'q' is pressed
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
+    # Release resources
     release_webcam(cap)
 
 if __name__ == "__main__":
