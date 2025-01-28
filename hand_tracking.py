@@ -11,18 +11,18 @@ mp_drawing = mp.solutions.drawing_utils
 # Colors for each finger
 FINGER_COLORS = {
     "Thumb": (255, 0, 0),    # Blue
-    "Index": (0, 255, 0),  # Green
-    "Middle": (0, 0, 255),  # Red
-    "Ring": (255, 255, 0),  # Cyan
+    "Index Finger": (0, 255, 0),  # Green
+    "Middle Finger": (0, 0, 255),  # Red
+    "Ring Finger": (255, 255, 0),  # Cyan
     "Pinky": (255, 0, 255),  # Magenta
 }
 
 # Finger landmark mapping
 FINGER_LANDMARKS = {
     "Thumb": mp_hands.HandLandmark.THUMB_TIP,
-    "Index": mp_hands.HandLandmark.INDEX_FINGER_TIP,
-    "Middle": mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
-    "Ring": mp_hands.HandLandmark.RING_FINGER_TIP,
+    "Index Finger": mp_hands.HandLandmark.INDEX_FINGER_TIP,
+    "Middle Finger": mp_hands.HandLandmark.MIDDLE_FINGER_TIP,
+    "Ring Finger": mp_hands.HandLandmark.RING_FINGER_TIP,
     "Pinky": mp_hands.HandLandmark.PINKY_TIP,
 }
 
@@ -161,38 +161,52 @@ def main():
             details_card.add_line(runtime_text)
 
             if results.multi_hand_landmarks:
-                for hand_landmarks, hand_classification in zip(
-                    results.multi_hand_landmarks, results.multi_handedness
-                ):
+                right_hand_landmarks = None
+                left_hand_landmarks = None
+
+                # Separate hands by label
+                for hand_landmarks, hand_classification in zip(results.multi_hand_landmarks, results.multi_handedness):
                     hand_label = hand_classification.classification[0].label
-
                     if hand_label == "Right":
-                        # Calculate the circle's center and radius
-                        thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
-                        index_tip = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+                        right_hand_landmarks = hand_landmarks
+                    elif hand_label == "Left":
+                        left_hand_landmarks = hand_landmarks
 
-                        circle_center = calculate_midpoint(thumb_tip, index_tip, frame.shape[:2])
-                        circle_radius = int(calculate_distance(thumb_tip, index_tip, frame.shape[:2]) / 2)
+                # Process right hand
+                if right_hand_landmarks:
+                    mp_drawing.draw_landmarks(
+                        frame, right_hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                        mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=2)
+                    )
 
-                        # Draw the circle
-                        cv2.circle(frame, circle_center, circle_radius, (0, 255, 0), 2)
+                    # Draw the circle
+                    thumb_tip = right_hand_landmarks.landmark[FINGER_LANDMARKS["Thumb"]]
+                    index_tip = right_hand_landmarks.landmark[FINGER_LANDMARKS["Index Finger"]]
+                    circle_center = calculate_midpoint(thumb_tip, index_tip, frame.shape[:2])
+                    circle_radius = int(calculate_distance(thumb_tip, index_tip, frame.shape[:2]) / 2)
+                    cv2.circle(frame, circle_center, circle_radius, (0, 255, 0), 2)
 
-                        # Add radius to the details card
-                        details_card.add_line(f"Circle Radius: {circle_radius:.2f}px")
+                    # Add radius to the details card
+                    details_card.add_line(f"Circle Radius: {circle_radius:.2f}px")
 
-                    # Draw finger labels
-                    for finger_name, finger_landmark in FINGER_LANDMARKS.items():
-                        landmark = hand_landmarks.landmark[finger_landmark]
-                        finger_x = int(landmark.x * frame.shape[1])
-                        finger_y = int(landmark.y * frame.shape[0])
+                # Process left hand
+                if left_hand_landmarks:
+                    mp_drawing.draw_landmarks(
+                        frame, left_hand_landmarks, mp_hands.HAND_CONNECTIONS,
+                        mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2)
+                    )
 
-                        label = TextLabel(
-                            label=finger_name,
-                            anchor=(finger_x, finger_y),
-                            offset=(10, -10),
-                            text_color=FINGER_COLORS[finger_name]
-                        )
-                        label.draw(frame)
+                    # Add Pointer 556 to left middle finger
+                    middle_finger_tip = left_hand_landmarks.landmark[FINGER_LANDMARKS["Middle Finger"]]
+                    middle_x = int(middle_finger_tip.x * frame.shape[1])
+                    middle_y = int(middle_finger_tip.y * frame.shape[0])
+                    pointer_label = TextLabel(
+                        label="Pointer 556",
+                        anchor=(middle_x, middle_y),
+                        offset=(-50, -10),
+                        text_color=(255, 255, 0)  # Yellow
+                    )
+                    pointer_label.draw(frame)
 
             # Draw the details card
             frame = details_card.draw(frame)
